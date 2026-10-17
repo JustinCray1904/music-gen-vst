@@ -1,0 +1,30 @@
+name: Build ChordGen
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Engine tests (informational)
+        continue-on-error: true
+        run: |
+          cmake -B build-tests -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-tests --config Release --target engine_test
+          .\build-tests\Release\engine_test.exe
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --target ChordGen_VST3 --parallel 4
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChordGen-VST3-Windows
+          path: build/ChordGen_artefacts/Release/VST3/ChordGen.vst3
