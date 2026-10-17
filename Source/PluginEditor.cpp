@@ -18,44 +18,73 @@ void PianoRollView::paint(juce::Graphics& g)
         return;
     }
 
-    int lo = 127, hi = 0;
-    for (const auto& e : pat->events) { lo = std::min(lo, e.note); hi = std::max(hi, e.note); }
-    lo -= 2;
-    hi += 2;
-    const int range = std::max(12, hi - lo + 1);
+    const juce::Colour colours[3] = { juce::Colour(ModernLookAndFeel::accent).brighter(0.35f), juce::Colour(ModernLookAndFeel::orange),
+                                      juce::Colour(ModernLookAndFeel::teal) };
 
-    const auto area = bounds.reduced(12.0f, 14.0f);
+    // One lane per part, top to bottom: melody, chords, bass. Each lane has its own pitch range,
+    // so every part is easy to read even when they sit in very different registers.
+    struct Lane { int channel; float weight; int lo = 127, hi = 0; bool any = false; float y = 0, h = 0; };
+    Lane lanes[3] = { { 2, 1.0f }, { 0, 1.5f }, { 1, 0.8f } };
+    for (const auto& e : pat->events)
+        for (auto& l : lanes)
+            if (l.channel == e.channel) { l.any = true; l.lo = std::min(l.lo, e.note); l.hi = std::max(l.hi, e.note); }
+
+    const auto area = bounds.reduced(14.0f, 16.0f);
+    constexpr float laneGap = 8.0f;
+    float totalWeight = 0.0f;
+    int laneCount = 0;
+    for (const auto& l : lanes) if (l.any) { totalWeight += l.weight; ++laneCount; }
+    if (laneCount == 0) return;
+
+    const float usable = area.getHeight() - laneGap * (float) (laneCount - 1);
+    float y = area.getY();
+    for (auto& l : lanes)
+    {
+        if (!l.any) continue;
+        l.y = y;
+        l.h = usable * l.weight / totalWeight;
+        y += l.h + laneGap;
+    }
+
     const float pxPerTick = area.getWidth() / (float) pat->loopTicks;
-    const float noteH = area.getHeight() / (float) range;
 
+    // lane backgrounds
+    for (const auto& l : lanes)
+        if (l.any)
+        {
+            g.setColour(juce::Colour(0xff1a1e29));
+            g.fillRoundedRectangle(area.getX(), l.y, area.getWidth(), l.h, 6.0f);
+        }
+
+    // beat / bar grid across all lanes
     for (int t = 0; t <= pat->loopTicks; t += cg::PPQ)
     {
         const bool bar = t % (cg::PPQ * 4) == 0;
-        g.setColour(juce::Colour(bar ? 0xff343b52 : 0xff1f2433));
+        g.setColour(juce::Colour(bar ? 0xff3a4260 : 0xff232a3b));
         g.drawVerticalLine((int) (area.getX() + (float) t * pxPerTick), area.getY(), area.getBottom());
     }
-    for (int n = lo; n < lo + range; ++n)
-        if (n % 12 == 0)
-        {
-            g.setColour(juce::Colour(0xff252b3c));
-            g.drawHorizontalLine((int) (area.getBottom() - (float) (n - lo) * noteH), area.getX(), area.getRight());
-        }
 
-    const juce::Colour colours[3] = { juce::Colour(ModernLookAndFeel::accent), juce::Colour(ModernLookAndFeel::orange),
-                                      juce::Colour(ModernLookAndFeel::teal) };
+    // notes
     for (const auto& e : pat->events)
     {
+        const Lane* lane = nullptr;
+        for (const auto& l : lanes) if (l.any && l.channel == e.channel) lane = &l;
+        if (lane == nullptr) continue;
+
+        const int lo = lane->lo - 1;
+        const int range = std::max(10, lane->hi - lane->lo + 3);
+        const float noteH = lane->h / (float) range;
         const float x = area.getX() + (float) e.tick * pxPerTick;
-        const float w = std::max(2.0f, (float) std::min(e.length, pat->loopTicks - e.tick) * pxPerTick - 1.0f);
-        const float y = area.getBottom() - (float) (e.note - lo + 1) * noteH;
-        g.setColour(colours[std::clamp(e.channel, 0, 2)].withAlpha(0.45f + (float) e.vel / 230.0f));
-        g.fillRoundedRectangle(x, y + 1.0f, w, std::max(2.0f, noteH - 2.0f), 2.5f);
+        const float w = std::max(3.0f, (float) std::min(e.length, pat->loopTicks - e.tick) * pxPerTick - 1.5f);
+        const float ny = lane->y + lane->h - (float) (e.note - lo + 1) * noteH;
+        g.setColour(colours[std::clamp(e.channel, 0, 2)].withAlpha(0.55f + (float) e.vel / 280.0f));
+        g.fillRoundedRectangle(x, ny, w, std::max(4.0f, noteH - 1.0f), 2.5f);
     }
 
     if (proc.uiRunning.load())
     {
         const float x = area.getX() + (float) (proc.uiBeat.load() * cg::PPQ) * pxPerTick;
-        g.setColour(juce::Colours::white.withAlpha(0.8f));
+        g.setColour(juce::Colours::white.withAlpha(0.85f));
         g.drawVerticalLine((int) x, area.getY(), area.getBottom());
     }
 
@@ -67,9 +96,9 @@ void PianoRollView::paint(juce::Graphics& g)
     {
         lx -= 62.0f;
         g.setColour(colours[i]);
-        g.fillEllipse(lx, 7.0f, 8.0f, 8.0f);
+        g.fillEllipse(lx, 3.0f, 8.0f, 8.0f);
         g.setColour(juce::Colour(ModernLookAndFeel::muted));
-        g.drawText(names[i], (int) lx + 12, 3, 50, 16, juce::Justification::centredLeft);
+        g.drawText(names[i], (int) lx + 12, -1, 50, 16, juce::Justification::centredLeft);
     }
 }
 
@@ -79,7 +108,7 @@ void DragMidiPill::paint(juce::Graphics& g)
     const auto r = getLocalBounds().toFloat().reduced(0.5f);
     g.setColour(juce::Colour(0xff262b3b));
     g.fillRoundedRectangle(r, 9.0f);
-    g.setColour(juce::Colour(ModernLookAndFeel::accent));
+    g.setColour(juce::Colour(ModernLookAndFeel::accent).brighter(0.3f));
     g.drawRoundedRectangle(r, 9.0f, 1.2f);
     g.setColour(juce::Colour(ModernLookAndFeel::text));
     g.setFont(14.0f);
@@ -98,16 +127,13 @@ void DragMidiPill::mouseDrag(const juce::MouseEvent& e)
     dragging = false;
 }
 
-// ============================================================ editor
-ChordGenEditor::ChordGenEditor(ChordGenProcessor& p)
-    : juce::AudioProcessorEditor(&p), proc(p), dragPill(p), roll(p)
+// ============================================================ content (fixed design size)
+ChordGenContent::ChordGenContent(ChordGenProcessor& p) : proc(p), dragPill(p), roll(p)
 {
-    setLookAndFeel(&laf);
-    setSize(1100, 720);
-
     // ---- top bar
     generateBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(ModernLookAndFeel::accent));
     generateBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    generateBtn.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     generateBtn.onClick = [this] { proc.generate(); roll.repaint(); };
     addAndMakeVisible(generateBtn);
 
@@ -189,16 +215,13 @@ ChordGenEditor::ChordGenEditor(ChordGenProcessor& p)
     addAndMakeVisible(progText);
 
     lastVersion = proc.patternVersion.load();
+
+    // Size is set LAST, after every child exists, so resized() lays all of them out.
+    setSize(designW, designH);
     startTimerHz(30);
 }
 
-ChordGenEditor::~ChordGenEditor()
-{
-    stopTimer();
-    setLookAndFeel(nullptr);
-}
-
-void ChordGenEditor::timerCallback()
+void ChordGenContent::timerCallback()
 {
     const auto v = proc.patternVersion.load();
     if (v != lastVersion) { lastVersion = v; roll.repaint(); }
@@ -211,7 +234,7 @@ void ChordGenEditor::timerCallback()
     if (playBtn.getButtonText() != want) playBtn.setButtonText(want);
 }
 
-void ChordGenEditor::paint(juce::Graphics& g)
+void ChordGenContent::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(ModernLookAndFeel::bg));
 
@@ -225,14 +248,14 @@ void ChordGenEditor::paint(juce::Graphics& g)
         g.fillRoundedRectangle(c.second.toFloat(), 14.0f);
         g.setColour(juce::Colour(ModernLookAndFeel::edge));
         g.drawRoundedRectangle(c.second.toFloat().reduced(0.5f), 14.0f, 1.0f);
-        g.setColour(juce::Colour(ModernLookAndFeel::accent));
+        g.setColour(juce::Colour(ModernLookAndFeel::accent).brighter(0.45f));
         g.setFont(13.0f);
         g.drawText(c.first.toUpperCase(), c.second.getX() + 14, c.second.getY() + 8, c.second.getWidth() - 28, 20,
                    juce::Justification::centredLeft);
     }
 }
 
-void ChordGenEditor::resized()
+void ChordGenContent::resized()
 {
     auto area = getLocalBounds().reduced(16);
     auto top = area.removeFromTop(48);
@@ -250,12 +273,12 @@ void ChordGenEditor::resized()
     statusLabel.setBounds(top);
 
     area.removeFromTop(10);
-    roll.setBounds(area.removeFromTop(200));
+    roll.setBounds(area.removeFromTop(230));
     area.removeFromTop(12);
     layoutCards(area);
 }
 
-void ChordGenEditor::layoutCards(juce::Rectangle<int> area)
+void ChordGenContent::layoutCards(juce::Rectangle<int> area)
 {
     constexpr int headerH = 34, rowH = 28, gap = 12;
     cards.clear();
@@ -291,4 +314,33 @@ void ChordGenEditor::layoutCards(juce::Rectangle<int> area)
         }
     }
     repaint();
+}
+
+// ============================================================ editor window (resizable)
+ChordGenEditor::ChordGenEditor(ChordGenProcessor& p) : juce::AudioProcessorEditor(&p), content(p)
+{
+    setLookAndFeel(&laf);
+    addAndMakeVisible(content);
+
+    setResizable(true, true);
+    setResizeLimits(660, 432, 1650, 1080);
+    getConstrainer()->setFixedAspectRatio((double) ChordGenContent::designW / (double) ChordGenContent::designH);
+    setSize(880, 608);   // 80% of the design size, fits small laptop screens; drag the corner to enlarge
+}
+
+ChordGenEditor::~ChordGenEditor()
+{
+    setLookAndFeel(nullptr);
+}
+
+void ChordGenEditor::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour(ModernLookAndFeel::bg));
+}
+
+void ChordGenEditor::resized()
+{
+    // The content is always laid out at its design size, then scaled to fit the window.
+    content.setBounds(0, 0, ChordGenContent::designW, ChordGenContent::designH);
+    content.setTransform(juce::AffineTransform::scale((float) getWidth() / (float) ChordGenContent::designW));
 }

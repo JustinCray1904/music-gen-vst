@@ -12,7 +12,7 @@
 class ModernLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
-    static constexpr juce::uint32 bg = 0xff101218, card = 0xff191c25, edge = 0xff2a2f3e, accent = 0xff7c8cff,
+    static constexpr juce::uint32 bg = 0xff101218, card = 0xff191c25, edge = 0xff2a2f3e, accent = 0xff5865ff,
                                   teal = 0xff49d6c1, orange = 0xffffa95c, text = 0xffe8ebf4, muted = 0xff8d95aa;
 
     ModernLookAndFeel()
@@ -97,7 +97,7 @@ public:
     }
 };
 
-// ------------------------------------------------------------ piano-roll preview
+// ------------------------------------------------------------ piano-roll preview (one lane per part)
 class PianoRollView : public juce::Component
 {
 public:
@@ -122,12 +122,15 @@ private:
     bool dragging = false;
 };
 
-// ------------------------------------------------------------ the editor
-class ChordGenEditor : public juce::AudioProcessorEditor, private juce::Timer
+// ------------------------------------------------------------ the whole interface, laid out at a fixed design size
+class ChordGenContent : public juce::Component, private juce::Timer
 {
 public:
-    explicit ChordGenEditor(ChordGenProcessor&);
-    ~ChordGenEditor() override;
+    static constexpr int designW = 1100;
+    static constexpr int designH = 760;
+
+    explicit ChordGenContent(ChordGenProcessor&);
+    ~ChordGenContent() override { stopTimer(); }
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -150,7 +153,6 @@ private:
     void layoutCards(juce::Rectangle<int> area);
 
     ChordGenProcessor& proc;
-    ModernLookAndFeel laf;   // must outlive every child component
 
     juce::TextButton generateBtn { "Generate" }, playBtn { "Play" }, resetBtn { "Reset history" };
     juce::ToggleButton soundToggle { "Sound" };
@@ -166,6 +168,23 @@ private:
 
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> cards;
     uint32_t lastVersion = 0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenContent)
+};
+
+// ------------------------------------------------------------ the plugin window: resizable, scales the content
+class ChordGenEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit ChordGenEditor(ChordGenProcessor&);
+    ~ChordGenEditor() override;
+
+    void paint(juce::Graphics&) override;
+    void resized() override;
+
+private:
+    ModernLookAndFeel laf;   // declared first, destroyed last
+    ChordGenContent content;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenEditor)
 };
